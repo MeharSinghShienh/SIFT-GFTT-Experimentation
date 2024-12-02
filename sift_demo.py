@@ -6,7 +6,7 @@ import os
 import cv2 as cv
 import matplotlib.pyplot as plt
 import numpy as np
-
+'''
 # Function to perform feature matching and homography using SIFT on a series of frames within a certain interval
 def featureMatchingHomographySIFT(video_path, start_time, time_interval, frames_count):
     # Load the video and retrieve frames per second
@@ -76,16 +76,7 @@ def featureMatchingHomographySIFT(video_path, start_time, time_interval, frames_
         plt.figure()
         plt.imshow(imgMatch, 'gray')
         plt.show()
-        '''
 
-        # Plot each result in a separate subplot
-        axs[i].imshow(imgMatch, 'gray')
-        axs[i].set_title(f'Frames {i} and {i+1}')
-        axs[i].axis('off')
-
-    # Show the combined plot
-    plt.show()
-    '''
 
 # Function to perform feature matching and homography using GFTT for keypoint detection and SIFT for descriptors
 def featureMatchingHomographySIFTandGFTT(video_path, start_time, time_interval, frames_count):
@@ -152,21 +143,182 @@ def featureMatchingHomographySIFTandGFTT(video_path, start_time, time_interval, 
         plt.figure()
         plt.imshow(imgMatch, 'gray')
         plt.show()
-        '''
+'''
         
-        # Plot each result in a separate subplot
-        axs[i].imshow(imgMatch, 'gray')
-        axs[i].set_title(f'Frames {i} and {i+1}')
-        axs[i].axis('off')
+# display points detected by SIFT on a given image
+def display_sift_keypoints(image_path):
+    # Read the image
+    image = cv.imread(image_path)
+    
+    if image is None:
+        print(f"Error: Could not read image from path '{image_path}'")
+        return
+    
+    # Convert the image to grayscale
+    gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    
+    # Initialize SIFT detector
+    sift = cv.SIFT_create()
+    
+    # Detect SIFT keypoints and descriptors
+    keypoints, descriptors = sift.detectAndCompute(gray, None)
 
-    # Show the combined plot
+
+    # Draw keypoints on the original image
+    image_with_keypoints = cv.drawKeypoints(
+        image, keypoints, None,
+        flags=cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS
+    )
+    
+    # Display the image with keypoints using matplotlib
+    plt.figure(figsize=(10, 10))
+    plt.imshow(cv.cvtColor(image_with_keypoints, cv.COLOR_BGR2RGB))
+    plt.axis('off')
+    plt.title(f"SIFT Keypoints ({len(keypoints)} detected)")
     plt.show()
-    '''
+
+# display points detected by GFTT on a given image
+def display_gftt_keypoints(image_path):
+    # Read the image
+    image = cv.imread(image_path)
+    
+    if image is None:
+        print(f"Error: Could not read image from path '{image_path}'")
+        return
+    
+    # Convert the image to grayscale
+    gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    
+    # Initialize GFTT for corner detection and SIFT for descriptor computation
+    gftt = cv.GFTTDetector_create(maxCorners=1000, qualityLevel=0.01, minDistance=5)
+    sift = cv.SIFT_create()
+    # Detect corners with GFTT
+    keypoints = gftt.detect(image)
+
+    # Draw keypoints on the original image
+    image_with_keypoints = cv.drawKeypoints(
+        image, keypoints, None,
+        flags=cv.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS
+    )
+    
+    # Display the image with keypoints using matplotlib
+    plt.figure(figsize=(10, 10))
+    plt.imshow(cv.cvtColor(image_with_keypoints, cv.COLOR_BGR2RGB))
+    plt.axis('off')
+    plt.title(f"SIFT Keypoints ({len(keypoints)} detected)")
+    plt.show()
+
+# Function to perform feature matching and homography using SIFT on 2 given images
+def featureMatchingHomographySIFTImages(img1, img2):
+    img1 = cv.imread(img1)
+    img2 = cv.imread(img2)
+
+    # Initialize SIFT and detect keypoints and descriptors
+    sift = cv.SIFT_create()
+    keypoints1, descriptors1 = sift.detectAndCompute(img1, None)
+    keypoints2, descriptors2 = sift.detectAndCompute(img2, None)
+
+    # Set up FLANN-based matcher with KD-Tree for SIFT
+    FLANN_INDEX_KDTREE = 1
+    indexParams = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    searchParams = dict(checks=50)
+    flann = cv.FlannBasedMatcher(indexParams, searchParams)
+    nNeighbours = 2
+    matches = flann.knnMatch(descriptors1, descriptors2, nNeighbours) # Find matches using k-nearest neighbors
+
+    # Filter good matches based on Lowe's ratio test
+    goodMatches = []
+    for m, n in matches:
+        #if m.distance < 0.1 * n.distance:
+        goodMatches.append(m)
+
+    # Extract matched points
+    srcPoints = np.float32([keypoints1[m.queryIdx].pt for m in goodMatches]).reshape(-1, 1, 2)
+    dstPoints = np.float32([keypoints2[m.trainIdx].pt for m in goodMatches]).reshape(-1, 1, 2)
+    
+    # Calculate homography using RANSAC
+    errorThreshold = 5
+    M,mask = cv.findHomography(srcPoints, dstPoints, cv.RANSAC, errorThreshold)
+    matchesMask = mask.ravel().tolist() # Mask for visualizing inlier matches
+
+    # Draw projected border on img2 for alignment visualization
+    h,w,_ = img1.shape
+    imgBorder = np.float32([[[0,0],[0,h-1],[w-1,h-1],[w-1,0]]]).reshape(-1,1,2)
+    warpedImgBorder = cv.perspectiveTransform(imgBorder, M)
+    img2 = cv.polylines(img2, [np.int32(warpedImgBorder)], True, 255, 3, cv.LINE_AA)
+    
+    # Draw matches with matched points highlighted in green
+    green = (0, 255, 0)
+    drawParams = dict(matchColor=green, singlePointColor=None, matchesMask=matchesMask, flags=cv.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
+    img1 = cv.imread('Waterloo_Field_Overview-1.jpg')
+    imgMatch = cv.drawMatches(img1, keypoints1, img2, keypoints2, goodMatches, None, **drawParams)
+    
+    plt.figure()
+    plt.imshow(imgMatch, 'gray')
+    plt.show()
+
+# Function to perform feature matching and homography using GFTT on 2 given images
+def featureMatchingHomographyGFTTImages(img1, img2):
+    img1 = cv.imread(img1)
+    img2 = cv.imread(img2)
+
+    # Initialize GFTT for corner detection and SIFT for descriptor computation
+    gftt = cv.GFTTDetector_create(maxCorners=1000, qualityLevel=0.01, minDistance=5)
+    sift = cv.SIFT_create()
+    # Detect corners with GFTT
+    keypoints1 = gftt.detect(img1)
+    keypoints2 = gftt.detect(img2)
+    # Compute SIFT descriptors at the GFTT keypoints
+    keypoints1, descriptors1 = sift.compute(img1, keypoints1)
+    keypoints2, descriptors2 = sift.compute(img2, keypoints2)
+
+    # Set up FLANN-based matcher with KD-Tree for SIFT
+    FLANN_INDEX_KDTREE = 1
+    indexParams = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    searchParams = dict(checks=50)
+    flann = cv.FlannBasedMatcher(indexParams, searchParams)
+    nNeighbours = 2
+    matches = flann.knnMatch(descriptors1, descriptors2, nNeighbours) # Find matches using k-nearest neighbors
+
+    # Filter good matches based on Lowe's ratio test
+    goodMatches = []
+    for m, n in matches:
+        if m.distance < 0.7 * n.distance:
+            goodMatches.append(m)
+
+    # Extract matched points
+    srcPoints = np.float32([keypoints1[m.queryIdx].pt for m in goodMatches]).reshape(-1, 1, 2)
+    dstPoints = np.float32([keypoints2[m.trainIdx].pt for m in goodMatches]).reshape(-1, 1, 2)
+
+    # Calculate homography using RANSAC
+    errorThreshold = 5
+    M,mask = cv.findHomography(srcPoints, dstPoints, cv.RANSAC, errorThreshold)
+    matchesMask = mask.ravel().tolist() # Mask for visualizing inlier matches
+
+    # Draw projected border on img2 for alignment visualization
+    h,w,_ = img1.shape
+    imgBorder = np.float32([[[0,0],[0,h-1],[w-1,h-1],[w-1,0]]]).reshape(-1,1,2)
+    warpedImgBorder = cv.perspectiveTransform(imgBorder, M)
+    img2 = cv.polylines(img2, [np.int32(warpedImgBorder)], True, 255, 3, cv.LINE_AA)
+
+    # Draw matches with matched points highlighted in green
+    green = (0, 255, 0)
+    drawParams = dict(matchColor=green, singlePointColor=None, matchesMask=matchesMask, flags=cv.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
+    imgMatch = cv.drawMatches(img1, keypoints1, img2, keypoints2, goodMatches, None, **drawParams)
+    
+    plt.figure()
+    plt.imshow(imgMatch, 'gray')
+    plt.show()
+
 
 if __name__ == '__main__':
     #add local paths to videos
     root = os.getcwd()
     #vid1path = os.path.join(root, 'videos', 'laurier_field.MTS')
     #featureMatchingHomographySIFTandGFTT(vid1path, 30, 3, 3)
-    vid2path = os.path.join(root, 'videos', 'basic_field.MTS')
-    featureMatchingHomographySIFTandGFTT(vid2path, 38, 3, 3)
+    #vid2path = os.path.join(root, 'videos', 'basic_field.MTS')
+    #featureMatchingHomographySIFTandGFTT(vid2path, 38, 3, 3)
+    img1path = os.path.join(root, 'edges.jpg')
+    img2path = os.path.join(root, 'rugby_field_diagram.jpg')
+    featureMatchingHomographySIFTImages(img1path, img2path)
+    #display_gftt_keypoints(img1path)
